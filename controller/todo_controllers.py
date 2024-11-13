@@ -1,9 +1,11 @@
+import base64
 from bson import ObjectId
 from pydantic import EmailStr
 from config.database import get_database, get_collection
 from models.models import Todo, UserModel
 from typing import Tuple, Optional
 from gridfs import GridFS
+from fastapi.responses import StreamingResponse
 
 # get all the todos data
 def get_all_todos(user_id: str) -> list:
@@ -27,29 +29,29 @@ def get_all_todos(user_id: str) -> list:
 # to get a perticuler todo item
 from bson import ObjectId
 
-# get perticular todos
-def get_particular_todo(todo_id: str, user_id: str) -> Todo:
-    try:
-        db, collection_name = get_collection("todoDB", "todo_collection")
+# # get perticular todos
+# def get_particular_todo(todo_id: str, user_id: str) -> Todo:
+#     try:
+#         db, collection_name = get_collection("todoDB", "todo_collection")
 
-        if collection_name is None:
-            raise Exception("Collection not found!")
+#         if collection_name is None:
+#             raise Exception("Collection not found!")
         
-        # Convert todo_id to ObjectId
-        object_id = ObjectId(todo_id)
+#         # Convert todo_id to ObjectId
+#         object_id = ObjectId(todo_id)
 
-        # Fetch data from MongoDB
-        data = collection_name.find_one({"_id": object_id, "user_id": user_id})
+#         # Fetch data from MongoDB
+#         data = collection_name.find_one({"_id": object_id, "user_id": user_id})
         
-        if not data:
-            raise Exception(f"Todo with id {todo_id} not found")
+#         if not data:
+#             raise Exception(f"Todo with id {todo_id} not found")
         
-        # Convert MongoDB document to Todo model
-        todo = Todo(**data)
+#         # Convert MongoDB document to Todo model
+#         todo = Todo(**data)
 
-        return todo
-    except Exception as e:
-        raise Exception(f"Error fetching particular todo: {e}")
+#         return todo
+#     except Exception as e:
+#         raise Exception(f"Error fetching particular todo: {e}")
 
 
 # to create a new todo
@@ -74,7 +76,7 @@ def create_new_todo(new_task: Todo, user_id: str) -> str:
         raise Exception(f"Error creating new todo: {e}")
 
 # to update particular todo
-def update_particular_todo(todo_id: str, updated_task: Todo) -> str:
+def update_particular_todo(todo_id: str, updated_task: dict) -> str:
     try:
         db, collection_name = get_collection("todoDB", "todo_collection")
         if collection_name is None:
@@ -83,12 +85,16 @@ def update_particular_todo(todo_id: str, updated_task: Todo) -> str:
         object_id = ObjectId(todo_id)
         
         # Convert the updated_task to a dictionary, excluding the 'id' field
-        update_data = updated_task.dict(exclude={"_id"})
+        # Fetch existing todo
+        existing_todo = collection_name.find_one({"_id": object_id})
+
+        if not existing_todo:
+            raise Exception(f"Todo with id {todo_id} not found")
 
         # Update the todo document in MongoDB
         result = collection_name.find_one_and_update(
             {"_id": object_id},  # Query to match the todo with this _id
-            {"$set": update_data},
+            {"$set": updated_task},
             return_document=True
         )
 
@@ -179,6 +185,9 @@ def update_user_profile(user_id: str, profile_image: dict) -> Optional[bool]:
         if db is None or collection_name is None:
             raise Exception("Database or collection not found!")
         
+        if not ObjectId.is_valid(user_id):
+            raise Exception("Invalid user ID format")
+
         object_id = ObjectId(user_id)
 
         # Initialize GridFS with the database
@@ -186,24 +195,36 @@ def update_user_profile(user_id: str, profile_image: dict) -> Optional[bool]:
 
         # Check if user already has a profile picture in GridFS
         existing_user = collection_name.find_one({"_id": object_id})
+        print('My file id is', existing_user)
 
         if existing_user and "profile_picture" in existing_user:
             # If a profile picture already exists, delete the old file from GridFS
-            old_file_id = ObjectId(existing_user["profile_picture"]) 
-            fs.delete(ObjectId(old_file_id))
+            old_file_id_str = existing_user["profile_picture"]
+            if old_file_id_str and ObjectId.is_valid(old_file_id_str):
+                old_file_id = ObjectId(old_file_id_str)
+                print('Deleting old file id:', old_file_id)
+                fs.delete(old_file_id)
+            else:
+                print("Existing profile_picture is not a valid ObjectId")
 
+         
         # Read and store the new profile picture in GridFS
         content = profile_image['profile_picture']
-        file_id = fs.put(content, filename=f"{user_id}_profile_photo.png")
+        content_bytes = base64.b64decode(content)
+        print('My image data is:', content_bytes)
+        file_id = fs.put(content_bytes, filename=f"{user_id}_profile_photo.png")
+        print('My file id is', file_id) # Retrieve the file from GridFS using the file ID
+        file_data = fs.get(file_id)
+        print('My file data is', StreamingResponse(file_data, media_type="image/png"))
 
         
-        # Update the todo document in MongoDB
-        result = collection_name.find_one_and_update(
-            {"_id": object_id},  # Query to match the todo with this _id
-            {"$set": {"profile_picture": str(file_id)}},
-            return_document=True
-        )
+        # # Update the todo document in MongoDB
+        # result = collection_name.find_one_and_update(
+        #     {"_id": object_id},  # Query to match the todo with this _id
+        #     {"$set": {"profile_picture": str(file_data)}},
+        #     return_document=True
+        # )
 
-        return result is not None
+        # return result is not None
     except Exception as e:
         raise Exception(f"Error updating user profile: {e}")

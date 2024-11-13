@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Form
 from config.database import get_database
 from controller import todo_controllers
 from fastapi import Response, Depends, HTTPException, Header, File, UploadFile
@@ -7,6 +7,7 @@ import jwt
 import os
 from dotenv import load_dotenv
 import base64
+from typing import Optional
 
 router = APIRouter()
 
@@ -55,20 +56,20 @@ async def get_all_todos(token: str = Depends(get_token)):
         print(f"Error occurred while fetching todos: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-# for get only one perticular todo
-@router.get("/getSingleTodo/{todoId}")
-async def getPerticularTodo(todoId: str, token: str = Depends(get_token)):
-    try:
-        user_id = decode_token(token)  # Function to decode the token and extract user_id
-        print(user_id)
-        todo = todo_controllers.get_particular_todo(todoId, user_id)
-        return {
-            "status": 200,
-            "message": "success",
-            "data": todo
-        }
-    except Exception as e:
-        print(f"Error occurred while fetching perticular todo: {e}")
+# # for get only one perticular todo
+# @router.get("/getSingleTodo/{todoId}")
+# async def getPerticularTodo(todoId: str, token: str = Depends(get_token)):
+#     try:
+#         user_id = decode_token(token)  # Function to decode the token and extract user_id
+#         print(user_id)
+#         todo = todo_controllers.get_particular_todo(todoId, user_id)
+#         return {
+#             "status": 200,
+#             "message": "success",
+#             "data": todo
+#         }
+#     except Exception as e:
+#         print(f"Error occurred while fetching perticular todo: {e}")
 
 # for create new todo
 @router.post("/createTodo")
@@ -86,9 +87,26 @@ async def create_task(new_task: models.Todo, token: str = Depends(get_token)):
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # for update perticular todo
-@router.put("/updateTodo/{todoId}")
-async def update_todo(todoId: str, updated_task: models.Todo):
+@router.put("/updateTodo")
+async def update_todo(todoId: str = Form(...), title: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    completed: Optional[bool] = Form(None)):
     try:
+
+       # Create a dictionary of only the provided fields
+        updated_task = {}
+        if title is not None:
+            updated_task["name"] = title
+        if description is not None:
+            updated_task["description"] = description
+        if completed is not None:
+            updated_task["complete"] = completed
+
+        print('My title is:', title)
+        print('My description is:', description)
+        print('My complete is:', completed)
+        
+
         todo = todo_controllers.update_particular_todo(todoId, updated_task)
         return {
             "status": 200,
@@ -162,7 +180,7 @@ async def updateUser(file: UploadFile = File(...), token: str = Depends(get_toke
         # get the token from the cookie
         try:
             user_id = decode_token(token)  # Function to decode the token and extract user_id
-            print(user_id)
+            print('My user id is:', user_id)
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token has expired")
         except jwt.PyJWTError:
@@ -174,8 +192,6 @@ async def updateUser(file: UploadFile = File(...), token: str = Depends(get_toke
 
         # Convert to base64
         content_base64 = base64.b64encode(content).decode("utf-8")
-
-        print("My file is", content_base64)
         
         # Create a document to insert
         file_data = content_base64
